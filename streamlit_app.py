@@ -25,7 +25,7 @@ def main():
 
 def parse_data(raw_data):
     # Split the raw data into pages
-    pages = re.split(r'CAPSTONE® COURIER\tPage \d+', raw_data)
+    pages = re.split(r'CAPSTONE® COURIER\s*Page \d+', raw_data)
     # Pages[0] is header, pages[1] is page 1, etc.
 
     data = []
