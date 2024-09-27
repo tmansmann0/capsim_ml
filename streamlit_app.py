@@ -22,17 +22,28 @@ def ideal_position_rule(performance_r2, performance_r1, size_r2, size_r1):
 st.title("Capsim Round Prediction")
 
 # Allow users to input data for two rounds
-st.header("Input Round Information")
-round_1 = st.text_input("Enter Round 1 Data (comma-separated, format: age, price lower, price upper, MTBF lower, MTBF upper, performance, size)")
-round_2 = st.text_input("Enter Round 2 Data (same format as above)")
+st.header("Input Round 1 Information")
+age_1 = st.number_input("Age Expectation (Round 1)", step=0.1)
+price_lower_1 = st.number_input("Price Lower Expectation (Round 1)", step=0.1)
+price_upper_1 = st.number_input("Price Upper Expectation (Round 1)", step=0.1)
+mtbf_lower_1 = st.number_input("MTBF Lower Limit (Round 1)", step=100.0)
+mtbf_upper_1 = st.number_input("MTBF Upper Limit (Round 1)", step=100.0)
+performance_1 = st.number_input("Performance (Round 1)", step=0.1)
+size_1 = st.number_input("Size (Round 1)", step=0.1)
 
-# Parse the input data
-if round_1 and round_2:
-    round_1_data = list(map(float, round_1.split(',')))
-    round_2_data = list(map(float, round_2.split(',')))
+st.header("Input Round 2 Information")
+age_2 = st.number_input("Age Expectation (Round 2)", step=0.1)
+price_lower_2 = st.number_input("Price Lower Expectation (Round 2)", step=0.1)
+price_upper_2 = st.number_input("Price Upper Expectation (Round 2)", step=0.1)
+mtbf_lower_2 = st.number_input("MTBF Lower Limit (Round 2)", step=100.0)
+mtbf_upper_2 = st.number_input("MTBF Upper Limit (Round 2)", step=100.0)
+performance_2 = st.number_input("Performance (Round 2)", step=0.1)
+size_2 = st.number_input("Size (Round 2)", step=0.1)
 
+# Predict next round based on input
+if st.button("Predict Round 3 Data"):
     # Predict next round using rule-based Ideal Position
-    performance_next, size_next = ideal_position_rule(round_2_data[5], round_1_data[5], round_2_data[6], round_1_data[6])
+    performance_next, size_next = ideal_position_rule(performance_2, performance_1, size_2, size_1)
 
     # Prepare input for the predictive model
     test_df = pd.DataFrame({
@@ -67,6 +78,7 @@ if round_1 and round_2:
 # Instructions for how to use the app
 st.write("""
 Instructions:
-1. Enter the data for two rounds using the format: age, price lower, price upper, MTBF lower, MTBF upper, performance, size.
-2. Click the "Download CSV" button to save the predicted next round data.
+1. Enter the data for two rounds using the fields for age, price, MTBF, performance, and size.
+2. Click "Predict Round 3 Data" to see the prediction.
+3. Download the predicted next round data as a CSV.
 """)
