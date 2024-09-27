@@ -7,21 +7,53 @@ def main():
 
     st.write("Paste the raw data from the Capstone Courier report (pages 5 to 9):")
 
-    raw_data = st.text_area("Raw Data", height=500)
+    # Initialize session state for accumulated data
+    if 'accumulated_data' not in st.session_state:
+        st.session_state['accumulated_data'] = []
 
-    if st.button("Extract Data"):
+    raw_data = st.text_area("Raw Data", height=300)
+
+    # Exclude stockout data checkbox
+    exclude_stockouts = st.checkbox('Exclude stockout data', value=True)
+
+    # Buttons
+    add_to_pile = st.button("Add to Pile")
+    clear_pile = st.button("Clear Pile")
+    download_all = st.button("Download All Data")
+
+    if add_to_pile:
         if raw_data:
             data = parse_data(raw_data)
             if data:
                 df = pd.DataFrame(data)
-                st.write("Extracted Data:")
-                st.dataframe(df)
-                csv = df.to_csv(index=False)
-                st.download_button("Download CSV", csv, "extracted_data.csv", "text/csv")
+                # Exclude stockout data if checkbox is selected
+                if exclude_stockouts:
+                    df = df[df['stockout no/yes (0 or 1)'] == '0']
+                # Append to accumulated data
+                st.session_state['accumulated_data'].append(df)
+                st.success("Data added to pile.")
+                # Clear the text area
+                st.experimental_rerun()
             else:
                 st.error("No data extracted. Please check the raw data format.")
         else:
             st.error("Please paste the raw data.")
+
+    if clear_pile:
+        st.session_state['accumulated_data'] = []
+        st.success("Pile cleared.")
+
+    if st.session_state['accumulated_data']:
+        # Concatenate all accumulated data
+        all_data = pd.concat(st.session_state['accumulated_data'], ignore_index=True)
+        st.write("Accumulated Data:")
+        st.dataframe(all_data)
+        # Download button for all data
+        if download_all:
+            csv = all_data.to_csv(index=False)
+            st.download_button("Download Combined CSV", csv, "combined_data.csv", "text/csv")
+    else:
+        st.info("No data in pile yet. Add data by pasting raw data and clicking 'Add to Pile'.")
 
 def parse_data(raw_data):
     # Extract the round number
