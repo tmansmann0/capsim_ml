@@ -5,14 +5,13 @@ import re
 def main():
     st.title("Capstone Courier Data Extractor")
 
-    st.write("Paste the raw data from the Capstone Courier report:")
+    st.write("Paste the raw data from the Capstone Courier report (pages 5 to 9):")
 
     raw_data = st.text_area("Raw Data", height=500)
 
     if st.button("Extract Data"):
         if raw_data:
-            round_number = extract_round_number(raw_data)
-            data = parse_data(raw_data, round_number)
+            data = parse_data(raw_data)
             if data:
                 df = pd.DataFrame(data)
                 st.write("Extracted Data:")
@@ -24,23 +23,19 @@ def main():
         else:
             st.error("Please paste the raw data.")
 
-def extract_round_number(raw_data):
-    match = re.search(r'Round:\s*(\d+)', raw_data)
-    if match:
-        return int(match.group(1))
+def parse_data(raw_data):
+    # Extract the round number
+    round_match = re.search(r'Round:\s*(\d+)', raw_data)
+    if round_match:
+        round_number = int(round_match.group(1))
     else:
-        return None
+        round_number = None
+        st.warning("Could not find the round number in the data.")
 
-def parse_data(raw_data, round_number):
-    # Split the raw data into pages using page headers
-    page_splits = re.split(r'CAPSTONE® COURIER.*?Page \d+', raw_data)
-    page_headers = re.findall(r'(CAPSTONE® COURIER.*?Page \d+)', raw_data)
-    pages = {}
-    for i, header in enumerate(page_headers):
-        page_number_match = re.search(r'Page (\d+)', header)
-        if page_number_match:
-            page_number = int(page_number_match.group(1))
-            pages[page_number] = page_splits[i+1]  # i+1 because splits start after the header
+    # Split the raw data into pages
+    pages = re.split(r'CAPSTONE® COURIER\tPage \d+', raw_data)
+    # Pages[0] is header, pages[1] is page 1, etc.
+
     data = []
 
     # Map page numbers to segments
@@ -53,7 +48,7 @@ def parse_data(raw_data, round_number):
     }
 
     for page_num, segment in segment_pages.items():
-        if page_num in pages:
+        if page_num < len(pages):
             page_data = pages[page_num]
             segment_data = parse_segment_page(page_data, segment, round_number)
             data.extend(segment_data)
@@ -63,14 +58,15 @@ def parse_data(raw_data, round_number):
 
 def parse_segment_page(page_text, segment, round_number):
     # Extract the Total Industry Unit Demand
-    total_demand_match = re.search(r'Total Industry Unit Demand\s+([\d,]+)', page_text)
+    total_demand_match = re.search(r'Total Industry Unit Demand\s+([0-9,]+)', page_text)
     if total_demand_match:
         total_industry_unit_demand = total_demand_match.group(1).replace(',', '')
     else:
         total_industry_unit_demand = ''
+        st.warning(f"Could not find Total Industry Unit Demand in {segment} segment.")
 
     # Extract the customer buying criteria
-    criteria_pattern = r'(\d+)\.\s+([A-Za-z ]+)\s+([^\d%]+[^\d%])(\d+)%'
+    criteria_pattern = r'(\d+)\.\s+([A-Za-z ]+)\s+([^%]+)\s+(\d+)%'
     criteria_matches = re.findall(criteria_pattern, page_text)
 
     criteria = {}
@@ -85,70 +81,61 @@ def parse_segment_page(page_text, segment, round_number):
     lines = page_text.splitlines()
     header_line_index = None
     for i, line in enumerate(lines):
-        if line.strip().startswith("Top Products in"):
-            # The header is likely in the next line(s)
-            header_line_index = i + 1
+        if line.startswith("Name\tMarket Share\tUnits Sold to Seg"):
+            header_line_index = i
             break
 
     if header_line_index is None:
         st.warning(f"Could not find products table in {segment} segment.")
         return []
 
-    # Collect header lines until we have the correct headers
-    headers = []
-    while header_line_index < len(lines):
-        header_line = lines[header_line_index].strip()
-        if header_line == '':
-            header_line_index += 1
-            continue
-        headers.extend(header_line.split('\t'))
-        if 'Dec. Cust. Survey' in headers:
-            break
-        header_line_index += 1
-
-    # Now collect the product lines
+    # Now parse the product data
     product_lines = []
     for line in lines[header_line_index+1:]:
         if line.strip() == '':
             continue
-        if re.match(r'^\s*CAPSTONE® COURIER', line) or line.strip().startswith("Perceptual Map"):
-            break  # Reached end of page or next section
-        product_lines.append(line.strip())
+        if re.match(r'^\s*CAPSTONE® COURIER', line):
+            break  # Reached end of page
+        product_lines.append(line)
 
     # Now parse each product line
     products = []
     for line in product_lines:
         # Split by tabs
         columns = line.split('\t')
-        if len(columns) < len(headers):
+        if len(columns) < 15:
             continue  # Skip invalid lines
 
-        product_data = dict(zip(headers, columns))
+        (name, market_share, units_sold, revision_date, stock_out,
+         pfmn_coord, size_coord, list_price, mtbf, age_dec31,
+         promo_budget, cust_awareness, sales_budget, cust_accessibility,
+         dec_cust_survey) = columns[:15]
 
         # Clean up data
         data_entry = {}
         data_entry['segment'] = segment
         data_entry['round'] = round_number
         data_entry['Total Industry Unit Demand'] = total_industry_unit_demand
-        data_entry['name'] = product_data.get('Name', '').strip()
-        data_entry['Market Share actual'] = product_data.get('Market Share', '').strip().replace('%', '')
-        data_entry['units sold actual'] = product_data.get('Units Sold to Seg', '').strip()
-        data_entry['Revision Date'] = product_data.get('Revision\nDate', '').strip()
-        stock_out = product_data.get('Stock Out', '').strip()
-        data_entry['stockout no/yes (0 or 1)'] = '1' if stock_out else '0'
-        data_entry['PMFT actual'] = product_data.get('Pfmn Coord', '').strip()
-        data_entry['size coordinate actual'] = product_data.get('Size Coord', '').strip()
-        data_entry['price actual'] = product_data.get('List\nPrice', '').strip().replace('$', '')
-        data_entry['MTBF actual'] = product_data.get('MTBF', '').strip()
-        data_entry['age actual'] = product_data.get('Age Dec.31', '').strip()
-        data_entry['Promo Budget actual'] = product_data.get('Promo\nBudget', '').strip().replace('$', '').replace(',', '')
-        data_entry['awareness actual'] = product_data.get('Cust. Aware-\nness', '').strip().replace('%', '')
-        data_entry['Sales Budget actual'] = product_data.get('Sales\nBudget', '').strip().replace('$', '').replace(',', '')
-        data_entry['accessibility actual'] = product_data.get('Cust. Access-\nibility', '').strip().replace('%', '')
-        data_entry['customer score actual'] = product_data.get('Dec. Cust. Survey', '').strip()
+        data_entry['name'] = name.strip()
+        data_entry['Market Share actual'] = market_share.strip().replace('%','')
+        data_entry['units sold actual'] = units_sold.strip()
+        data_entry['Revision Date'] = revision_date.strip()
+        data_entry['stockout no/yes (0 or 1)'] = '0' if stock_out.strip() == '' else '1'
+        data_entry['PMFT actual'] = pfmn_coord.strip()
+        data_entry['size coordinate actual'] = size_coord.strip()
+        data_entry['price actual'] = list_price.strip().replace('$','')
+        data_entry['MTBF actual'] = mtbf.strip()
+        data_entry['age actual'] = age_dec31.strip()
+        data_entry['Promo Budget actual'] = promo_budget.strip().replace('$','').replace(',','')
+        data_entry['awareness actual'] = cust_awareness.strip().replace('%','')
+        data_entry['Sales Budget actual'] = sales_budget.strip().replace('$','').replace(',','')
+        data_entry['accessibility actual'] = cust_accessibility.strip().replace('%','')
+        data_entry['customer score actual'] = dec_cust_survey.strip()
 
         # Add criteria expectations and importance
-        data_entry['age expectation'] = criteria.get('Age', {}).get('expectation', '')
+        age_expectation = criteria.get('Age', {}).get('expectation', '')
+        age_match = re.search(r'Ideal Age\s*=\s*([0-9.]+)', age_expectation)
+        data_entry['age expectation'] = age_match.group(1) if age_match else ''
         data_entry['age expectation importance'] = criteria.get('Age', {}).get('importance', '')
         price_expectation = criteria.get('Price', {}).get('expectation', '')
         price_range = re.findall(r'\$([0-9.]+)\s*-\s*\$?([0-9.]+)', price_expectation)
@@ -173,6 +160,7 @@ def parse_segment_page(page_text, segment, round_number):
         else:
             data_entry['reliability MTBF lower limit'] = ''
             data_entry['reliability MTBF upper limit'] = ''
+        data_entry['reliability importance'] = criteria.get('Reliability', {}).get('importance', '')
         products.append(data_entry)
 
     return products
