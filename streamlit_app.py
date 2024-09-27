@@ -11,7 +11,8 @@ def main():
 
     if st.button("Extract Data"):
         if raw_data:
-            data = parse_data(raw_data)
+            round_number = extract_round_number(raw_data)
+            data = parse_data(raw_data, round_number)
             if data:
                 df = pd.DataFrame(data)
                 st.write("Extracted Data:")
@@ -23,14 +24,21 @@ def main():
         else:
             st.error("Please paste the raw data.")
 
-def parse_data(raw_data):
+def extract_round_number(raw_data):
+    match = re.search(r'Round:\s*(\d+)', raw_data)
+    if match:
+        return int(match.group(1))
+    else:
+        return None
+
+def parse_data(raw_data, round_number):
     # Split the raw data into pages
     pages = re.split(r'CAPSTONE® COURIER\s*Page \d+', raw_data)
-    # Pages[0] is header, pages[1] is page 1, etc.
+    # Pages[1] is page 1, pages[2] is page 2, etc.
 
     data = []
 
-    # Map page numbers to segments
+    # Map page numbers to segments (adjusted for zero-based indexing)
     segment_pages = {
         5: "Traditional",
         6: "Low End",
@@ -39,18 +47,27 @@ def parse_data(raw_data):
         9: "Size"
     }
 
+    # Adjust page indices to match the pages list
     for page_num, segment in segment_pages.items():
-        if page_num < len(pages):
-            page_data = pages[page_num]
-            segment_data = parse_segment_page(page_data, segment)
+        page_index = page_num  # Since pages[1] is Page 1
+        if page_index < len(pages):
+            page_data = pages[page_index]
+            segment_data = parse_segment_page(page_data, segment, round_number)
             data.extend(segment_data)
         else:
             st.warning(f"Page {page_num} not found in the data.")
     return data
 
-def parse_segment_page(page_text, segment):
+def parse_segment_page(page_text, segment, round_number):
+    # Extract the Total Industry Unit Demand
+    total_demand_match = re.search(r'Total Industry Unit Demand\s+([\d,]+)', page_text)
+    if total_demand_match:
+        total_industry_unit_demand = total_demand_match.group(1).replace(',', '')
+    else:
+        total_industry_unit_demand = ''
+
     # Extract the customer buying criteria
-    criteria_pattern = r'(\d+)\.\s+([A-Za-z ]+)\s+([^%]+)\s+(\d+)%'
+    criteria_pattern = r'(\d+)\.\s+([A-Za-z ]+)\s+([^\d%]+[^\d%])(\d+)%'
     criteria_matches = re.findall(criteria_pattern, page_text)
 
     criteria = {}
@@ -62,20 +79,31 @@ def parse_segment_page(page_text, segment):
         criteria[criterion] = {'expectation': expectation, 'importance': importance}
 
     # Now extract the Top Products table
+    # First, find the line starting with 'Top Products in'
     lines = page_text.splitlines()
     header_line_index = None
     for i, line in enumerate(lines):
-        if line.startswith("Name\tMarket Share\tUnits Sold to Seg"):
-            header_line_index = i
+        if line.strip().startswith(f"Top Products in {segment} Segment"):
+            # The header is likely in the next line(s)
+            header_line_index = i + 1
             break
 
     if header_line_index is None:
         st.warning(f"Could not find products table in {segment} segment.")
         return []
 
-    # Now parse the product data
+    # Collect header lines until we have at least 15 columns
+    headers = []
+    while header_line_index < len(lines):
+        header_line = lines[header_line_index]
+        headers.extend(header_line.strip().split('\t'))
+        header_line_index += 1
+        if len(headers) >= 15:
+            break
+
+    # Now collect the product lines
     product_lines = []
-    for line in lines[header_line_index+1:]:
+    for line in lines[header_line_index:]:
         if line.strip() == '':
             continue
         if re.match(r'^\s*CAPSTONE® COURIER', line):
@@ -84,11 +112,24 @@ def parse_segment_page(page_text, segment):
 
     # Now parse each product line
     products = []
-    for line in product_lines:
+    i = 0
+    while i < len(product_lines):
+        line = product_lines[i]
         # Split by tabs
-        columns = line.split('\t')
+        columns = line.strip().split('\t')
+        # Check if there are enough columns
         if len(columns) < 15:
-            continue  # Skip invalid lines
+            # Try to combine with next line
+            if i+1 < len(product_lines):
+                next_line = product_lines[i+1]
+                columns.extend(next_line.strip().split('\t'))
+                i += 1  # Skip next line
+            else:
+                i += 1
+                continue  # Cannot fix, skip this line
+        if len(columns) < 15:
+            i += 1
+            continue  # Still insufficient columns
 
         (name, market_share, units_sold, revision_date, stock_out,
          pfmn_coord, size_coord, list_price, mtbf, age_dec31,
@@ -98,7 +139,7 @@ def parse_segment_page(page_text, segment):
         # Clean up data
         data_entry = {}
         data_entry['segment'] = segment
-        data_entry['round'] = 0  # Assuming round 0, or extract from data if available
+        data_entry['round'] = round_number
         data_entry['name'] = name.strip()
         data_entry['Market Share actual'] = market_share.strip().replace('%','')
         data_entry['units sold actual'] = units_sold.strip()
@@ -141,7 +182,9 @@ def parse_segment_page(page_text, segment):
         else:
             data_entry['reliability MTBF lower limit'] = ''
             data_entry['reliability MTBF upper limit'] = ''
+        data_entry['Total Industry Unit Demand'] = total_industry_unit_demand
         products.append(data_entry)
+        i += 1
 
     return products
 
