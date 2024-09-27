@@ -21,17 +21,8 @@ def ideal_position_rule(performance_r2, performance_r1, size_r2, size_r1):
 # Streamlit app setup
 st.title("Capsim Round Prediction")
 
-# Allow users to input data for two rounds
-st.header("Input Round 1 Information")
-age_1 = st.number_input("Age Expectation (Round 1)", step=0.1)
-price_lower_1 = st.number_input("Price Lower Expectation (Round 1)", step=0.1)
-price_upper_1 = st.number_input("Price Upper Expectation (Round 1)", step=0.1)
-mtbf_lower_1 = st.number_input("MTBF Lower Limit (Round 1)", step=100.0)
-mtbf_upper_1 = st.number_input("MTBF Upper Limit (Round 1)", step=100.0)
-performance_1 = st.number_input("Performance (Round 1)", step=0.1)
-size_1 = st.number_input("Size (Round 1)", step=0.1)
-
-st.header("Input Round 2 Information")
+# Input for the second round (current round)
+st.header("Input Current Capsim Courier Info (Round 2)")
 age_2 = st.number_input("Age Expectation (Round 2)", step=0.1)
 price_lower_2 = st.number_input("Price Lower Expectation (Round 2)", step=0.1)
 price_upper_2 = st.number_input("Price Upper Expectation (Round 2)", step=0.1)
@@ -39,6 +30,16 @@ mtbf_lower_2 = st.number_input("MTBF Lower Limit (Round 2)", step=100.0)
 mtbf_upper_2 = st.number_input("MTBF Upper Limit (Round 2)", step=100.0)
 performance_2 = st.number_input("Performance (Round 2)", step=0.1)
 size_2 = st.number_input("Size (Round 2)", step=0.1)
+
+# Input for the first round (prior round)
+st.header("Input Prior Round's Capsim Courier Info (Round 1)")
+age_1 = st.number_input("Age Expectation (Round 1)", step=0.1)
+price_lower_1 = st.number_input("Price Lower Expectation (Round 1)", step=0.1)
+price_upper_1 = st.number_input("Price Upper Expectation (Round 1)", step=0.1)
+mtbf_lower_1 = st.number_input("MTBF Lower Limit (Round 1)", step=100.0)
+mtbf_upper_1 = st.number_input("MTBF Upper Limit (Round 1)", step=100.0)
+performance_1 = st.number_input("Performance (Round 1)", step=0.1)
+size_1 = st.number_input("Size (Round 1)", step=0.1)
 
 # Predict next round based on input
 if st.button("Predict Round 3 Data"):
@@ -78,7 +79,9 @@ if st.button("Predict Round 3 Data"):
 # Instructions for how to use the app
 st.write("""
 Instructions:
-1. Enter the data for two rounds using the fields for age, price, MTBF, performance, and size.
+1. Enter the data for two rounds:
+   - First, input the current round's data (Round 2).
+   - Then, input the prior round's data (Round 1).
 2. Click "Predict Round 3 Data" to see the prediction.
 3. Download the predicted next round data as a CSV.
 """)
