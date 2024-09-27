@@ -1,123 +1,149 @@
 import streamlit as st
 import pandas as pd
-import joblib
-from pathlib import Path
+import re
 
-# Set page configuration
-st.set_page_config(page_title="Capsim Round Prediction", layout="centered")
+def main():
+    st.title("Capstone Courier Data Extractor")
 
-# Load the trained model with caching
-@st.cache_resource
-def load_model():
-    model_path = Path("capsim_round_prediction_model_0_to_5.pkl")
-    if not model_path.is_file():
-        st.error(f"Model file not found at {model_path.resolve()}")
-        return None
-    model = joblib.load(model_path)
-    return model
+    st.write("Paste the raw data from the Capstone Courier report (pages 5 to 9):")
 
-model = load_model()
+    raw_data = st.text_area("Raw Data", height=500)
 
-# Rule-based Ideal Position calculation
-def ideal_position_rule(performance_r2, performance_r1, size_r2, size_r1):
-    performance_modifier = performance_r2 - performance_r1
-    size_modifier = size_r2 - size_r1
-    next_performance = performance_r2 + performance_modifier
-    next_size = size_r2 + size_modifier
-    return next_performance, next_size
+    if st.button("Extract Data"):
+        if raw_data:
+            data = parse_data(raw_data)
+            if data:
+                df = pd.DataFrame(data)
+                st.write("Extracted Data:")
+                st.dataframe(df)
+                csv = df.to_csv(index=False)
+                st.download_button("Download CSV", csv, "extracted_data.csv", "text/csv")
+            else:
+                st.error("No data extracted. Please check the raw data format.")
+        else:
+            st.error("Please paste the raw data.")
 
-# Streamlit app setup
-st.title("📈 Capsim Round Prediction")
+def parse_data(raw_data):
+    # Split the raw data into pages
+    pages = re.split(r'CAPSTONE® COURIER\tPage \d+', raw_data)
+    # Pages[0] is header, pages[1] is page 1, etc.
 
-# Instructions for how to use the app
-st.write("""
-## Instructions:
-1. **Input Data for Two Rounds:**
-   - **Current Round:** Enter the data for the current round.
-   - **Prior Round:** Enter the data from the previous round.
-2. **Predict Next Round:**
-   - Click the "Predict Next Round Data" button to generate predictions.
-3. **Download Results:**
-   - Use the "Download CSV" button to save the predicted data.
-""")
+    data = []
 
-# Function to collect input data
-def get_input(round_label):
-    with st.container():
-        st.subheader(f"**Input {round_label} Round's Capsim Courier Info**")
-        age = st.number_input(f"Age Expectation ({round_label} Round)", step=0.1, format="%.1f")
-        price_lower = st.number_input(f"Price Lower Expectation ({round_label} Round)", step=0.1, format="%.1f")
-        price_upper = st.number_input(f"Price Upper Expectation ({round_label} Round)", step=0.1, format="%.1f")
-        mtbf_lower = st.number_input(f"MTBF Lower Limit ({round_label} Round)", step=100.0, format="%.1f")
-        mtbf_upper = st.number_input(f"MTBF Upper Limit ({round_label} Round)", step=100.0, format="%.1f")
-        performance = st.number_input(f"Performance ({round_label} Round)", step=0.1, format="%.1f")
-        size = st.number_input(f"Size ({round_label} Round)", step=0.1, format="%.1f")
-    return age, price_lower, price_upper, mtbf_lower, mtbf_upper, performance, size
+    # Map page numbers to segments
+    segment_pages = {
+        5: "Traditional",
+        6: "Low End",
+        7: "High End",
+        8: "Performance",
+        9: "Size"
+    }
 
-# Input for the current round
-age_2, price_lower_2, price_upper_2, mtbf_lower_2, mtbf_upper_2, performance_2, size_2 = get_input("Current")
+    for page_num, segment in segment_pages.items():
+        if page_num < len(pages):
+            page_data = pages[page_num]
+            segment_data = parse_segment_page(page_data, segment)
+            data.extend(segment_data)
+        else:
+            st.warning(f"Page {page_num} not found in the data.")
+    return data
 
-# Input for the prior round
-age_1, price_lower_1, price_upper_1, mtbf_lower_1, mtbf_upper_1, performance_1, size_1 = get_input("Prior")
+def parse_segment_page(page_text, segment):
+    # Extract the customer buying criteria
+    criteria_pattern = r'(\d+)\.\s+([A-Za-z ]+)\s+([^%]+)\s+(\d+)%'
+    criteria_matches = re.findall(criteria_pattern, page_text)
 
-# Predict next round based on input
-if st.button("🔮 Predict Next Round Data"):
-    if model is None:
-        st.error("Model is not loaded. Please ensure the model file is available.")
-    else:
-        # Calculate Ideal Positions
-        performance_next, size_next = ideal_position_rule(
-            performance_r2=performance_2,
-            performance_r1=performance_1,
-            size_r2=size_2,
-            size_r1=size_1
-        )
+    criteria = {}
+    for match in criteria_matches:
+        number, criterion, expectation, importance = match
+        criterion = criterion.strip()
+        expectation = expectation.strip()
+        importance = int(importance)
+        criteria[criterion] = {'expectation': expectation, 'importance': importance}
 
-        # Prepare input for the predictive model
-        # Ensure that the features match what the model expects
-        # Example: If the model expects more features, include them accordingly
-        test_data = {
-            'round': 5,  # Assuming round 5 is the target
-            'segment_size': 1  # Adjust based on your model's training
-            # Add other necessary features here
-        }
-        test_df = pd.DataFrame([test_data])
+    # Now extract the Top Products table
+    lines = page_text.splitlines()
+    header_line_index = None
+    for i, line in enumerate(lines):
+        if line.startswith("Name\tMarket Share\tUnits Sold to Seg"):
+            header_line_index = i
+            break
 
-        # If your model requires categorical variables to be encoded, handle them here
-        # For example, using get_dummies or other encoding methods
-        # Ensure that the training and prediction feature sets align
-        # Example:
-        # X_test = pd.get_dummies(test_df, drop_first=True)
-        X_test = test_df  # Modify as needed
+    if header_line_index is None:
+        st.warning(f"Could not find products table in {segment} segment.")
+        return []
 
-        try:
-            predictions = model.predict(X_test)
-            # If predictions are multi-dimensional, adjust indexing
-            # Example assumes predictions is 1D array
-            if isinstance(predictions, (list, pd.Series)):
-                predictions = [predictions]  # Convert to list of lists for consistency
-            next_round_data = {
-                "Age Expectation": [predictions[0][0]],
-                "Price Lower Expectation": [predictions[0][1]],
-                "Price Upper Expectation": [predictions[0][2]],
-                "MTBF Lower Limit": [predictions[0][3]],
-                "MTBF Upper Limit": [predictions[0][4]],
-                "Ideal Position Performance": [performance_next],
-                "Ideal Position Size": [size_next]
-            }
-            next_round_df = pd.DataFrame(next_round_data)
+    # Now parse the product data
+    product_lines = []
+    for line in lines[header_line_index+1:]:
+        if line.strip() == '':
+            continue
+        if re.match(r'^\s*CAPSTONE® COURIER', line):
+            break  # Reached end of page
+        product_lines.append(line)
 
-            # Display the predicted data
-            st.subheader("📊 Predicted Next Round Data")
-            st.dataframe(next_round_df)
+    # Now parse each product line
+    products = []
+    for line in product_lines:
+        # Split by tabs
+        columns = line.split('\t')
+        if len(columns) < 15:
+            continue  # Skip invalid lines
 
-            # Prepare CSV for download
-            csv_data = next_round_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv_data,
-                file_name="predicted_round.csv",
-                mime="text/csv"
-            )
-        except Exception as e:
-            st.error(f"An error occurred during prediction: {e}")
+        (name, market_share, units_sold, revision_date, stock_out,
+         pfmn_coord, size_coord, list_price, mtbf, age_dec31,
+         promo_budget, cust_awareness, sales_budget, cust_accessibility,
+         dec_cust_survey) = columns[:15]
+
+        # Clean up data
+        data_entry = {}
+        data_entry['segment'] = segment
+        data_entry['round'] = 0  # Assuming round 0, or extract from data if available
+        data_entry['name'] = name.strip()
+        data_entry['Market Share actual'] = market_share.strip().replace('%','')
+        data_entry['units sold actual'] = units_sold.strip()
+        data_entry['Revision Date'] = revision_date.strip()
+        data_entry['stockout no/yes (0 or 1)'] = '0' if stock_out.strip() == '' else '1'
+        data_entry['PMFT actual'] = pfmn_coord.strip()
+        data_entry['size coordinate actual'] = size_coord.strip()
+        data_entry['price actual'] = list_price.strip().replace('$','')
+        data_entry['MTBF actual'] = mtbf.strip()
+        data_entry['age actual'] = age_dec31.strip()
+        data_entry['Promo Budget actual'] = promo_budget.strip().replace('$','').replace(',','')
+        data_entry['awareness actual'] = cust_awareness.strip().replace('%','')
+        data_entry['Sales Budget actual'] = sales_budget.strip().replace('$','').replace(',','')
+        data_entry['accessibility actual'] = cust_accessibility.strip().replace('%','')
+        data_entry['customer score actual'] = dec_cust_survey.strip()
+
+        # Add criteria expectations and importance
+        data_entry['age expectation'] = criteria.get('Age', {}).get('expectation', '')
+        data_entry['age expectation importance'] = criteria.get('Age', {}).get('importance', '')
+        price_expectation = criteria.get('Price', {}).get('expectation', '')
+        price_range = re.findall(r'\$([0-9.]+)\s*-\s*\$?([0-9.]+)', price_expectation)
+        if price_range:
+            data_entry['price lower expectation'] = price_range[0][0]
+            data_entry['price upper expectation'] = price_range[0][1]
+        else:
+            data_entry['price lower expectation'] = ''
+            data_entry['price upper expectation'] = ''
+        data_entry['price importance'] = criteria.get('Price', {}).get('importance', '')
+        ideal_position = criteria.get('Ideal Position', {}).get('expectation', '')
+        pfmn_match = re.search(r'Pfmn\s*([0-9.]+)', ideal_position)
+        size_match = re.search(r'Size\s*([0-9.]+)', ideal_position)
+        data_entry['Ideal Position PMFT'] = pfmn_match.group(1) if pfmn_match else ''
+        data_entry['Ideal Position Size'] = size_match.group(1) if size_match else ''
+        data_entry['Ideal Position Importance'] = criteria.get('Ideal Position', {}).get('importance', '')
+        reliability_expectation = criteria.get('Reliability', {}).get('expectation', '')
+        mtbf_range = re.findall(r'MTBF\s*([0-9]+)-([0-9]+)', reliability_expectation)
+        if mtbf_range:
+            data_entry['reliability MTBF lower limit'] = mtbf_range[0][0]
+            data_entry['reliability MTBF upper limit'] = mtbf_range[0][1]
+        else:
+            data_entry['reliability MTBF lower limit'] = ''
+            data_entry['reliability MTBF upper limit'] = ''
+        products.append(data_entry)
+
+    return products
+
+if __name__ == '__main__':
+    main()
